@@ -1,0 +1,78 @@
+name: Deploy React Admin (Production)
+
+on:
+  push:
+    branches: [ production ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: deploy
+
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+
+      # Variables (Environment -> deploy -> Variables)
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}         # e.g. /var/www/debarras/admin
+      NODE_VERSION: ${{ vars.NODE_VERSION || '20' }}
+      PM2_APP: ${{ vars.PM2_APP || 'admin' }}
+      APP_PORT: ${{ vars.APP_PORT || '3001' }}
+      NVM_DIR: ${{ vars.NVM_DIR }}
+
+      # If monorepo: set to subfolder, ex: "admin"
+      APP_SUBDIR: ${{ vars.APP_SUBDIR || '.' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add VPS to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [[ -n "${{ secrets.SSH_KNOWN_HOSTS }}" ]]; then
+            echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload deploy script
+        run: |
+          scp -P "$SSH_PORT" deploy.sh "$SSH_USERNAME@$SSH_HOST:/tmp/deploy.sh"
+
+      # OPTIONAL: env payload (use VITE_ vars)
+      - name: Create env payload
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL }}
+        run: |
+          cat <<EOF > env.payload
+          VITE_API_BASE_URL=${VITE_API_BASE_URL}
+          EOF
+
+      - name: Upload env payload
+        run: |
+          scp -P "$SSH_PORT" env.payload "$SSH_USERNAME@$SSH_HOST:/tmp/admin.env"
+          rm env.payload
+
+      - name: Execute remote deployment
+        run: |
+          ssh -p "$SSH_PORT" "$SSH_USERNAME@$SSH_HOST" "\
+            export APP_DIR='${DEPLOY_PATH}' && \
+            export REPO_URL='git@github.com:${{ github.repository }}.git' && \
+            export BRANCH='production' && \
+            export NVM_DIR='${{ vars.NVM_DIR }}' && \
+            export PM2_APP='${PM2_APP}' && \
+            export APP_PORT='${APP_PORT}' && \
+            export APP_SUBDIR='${APP_SUBDIR}' && \
+            export ENV_PAYLOAD_PATH='/tmp/admin.env' && \
+            bash /tmp/deploy.sh \
+          "
