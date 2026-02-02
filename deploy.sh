@@ -104,13 +104,15 @@ cd "$APP_DIR/$APP_SUBDIR"
 log "Starting/restarting PM2 static server"
 mkdir -p "$APP_DIR/logs"
 
-if pm2 describe "$PM2_APP" >/dev/null 2>&1; then
-  pm2 restart ecosystem.config.cjs --only "$PM2_APP"
+# Load PM2 if available
+if command -v pm2 &> /dev/null; then
+  # Start or restart the app
+  pm2 start ecosystem.config.cjs --name "$PM2_APP" --update-env 2>/dev/null || pm2 restart "$PM2_APP" --update-env
+  pm2 save
 else
-  pm2 start ecosystem.config.cjs --only "$PM2_APP"
+  log "ERROR: PM2 not found. Install with: npm install -g pm2"
+  exit 1
 fi
-
-pm2 save
 
 log "Deployment completed successfully"
 log "React app '$PM2_APP' serving dist/ on port $APP_PORT"
