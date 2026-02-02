@@ -105,9 +105,9 @@ log "Starting/restarting PM2 static server"
 mkdir -p "$APP_DIR/logs"
 
 if pm2 describe "$PM2_APP" >/dev/null 2>&1; then
-  pm2 restart ecosystem.config.js --only "$PM2_APP"
+  pm2 restart ecosystem.config.cjs --only "$PM2_APP"
 else
-  pm2 start ecosystem.config.js --only "$PM2_APP"
+  pm2 start ecosystem.config.cjs --only "$PM2_APP"
 fi
 
 pm2 save
