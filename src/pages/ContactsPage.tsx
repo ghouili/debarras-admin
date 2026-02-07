@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import toast from 'react-hot-toast'
 import type { ContactDto, ListResponse } from '../types/dtos'
 import { queryKeys } from '../api/queryKeys'
-import { createContact, deleteContact, listContacts, updateContact } from '../api/contacts'
+import { createContact, deleteContact, listContacts, updateContact, updateContactStatus } from '../api/contacts'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
@@ -25,7 +25,7 @@ const schema = z.object({
   postalCode: z.string().optional(),
   message: z.string().min(2, 'Message requis'),
   consent: z.boolean(),
-  status: z.enum(['new', 'in_progress', 'closed']),
+  status: z.enum(['nouveau', 'en_cours', 'fermee']),
 })
 
 type FormValues = z.infer<typeof schema>
@@ -40,6 +40,30 @@ const getInitials = (name: string) =>
     .map((part) => part[0]?.toUpperCase())
     .join('')
 
+const contactStatusOptions = [
+  { value: 'nouveau', label: 'Nouveau' },
+  { value: 'en_cours', label: 'En cours' },
+  { value: 'fermee', label: 'Fermé' },
+] as const
+
+const contactStatusLabels: Record<ContactDto['status'], string> = {
+  nouveau: 'Nouveau',
+  en_cours: 'En cours',
+  fermee: 'Fermé',
+}
+
+const contactStatusVariants: Record<ContactDto['status'], 'success' | 'warning' | 'info'> = {
+  nouveau: 'info',
+  en_cours: 'warning',
+  fermee: 'success',
+}
+
+const contactStatusBarClasses: Record<'success' | 'warning' | 'info', string> = {
+  success: 'bg-[hsl(var(--success))]',
+  warning: 'bg-[hsl(var(--warning))]',
+  info: 'bg-[hsl(var(--primary))]',
+}
+
 export function ContactsPage() {
   const queryClient = useQueryClient()
   const { data: response, isLoading } = useQuery<ListResponse<ContactDto>>({
@@ -51,11 +75,12 @@ export function ContactsPage() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [status, setStatus] = useState('ALL')
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table')
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('cards')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ContactDto | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [selectedContact, setSelectedContact] = useState<ContactDto | null>(null)
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
 
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedSearch(search), 300)
@@ -92,6 +117,35 @@ export function ContactsPage() {
     onError: () => toast.error('Suppression échouée'),
   })
 
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: ContactDto['status'] }) => updateContactStatus(id, status),
+    onMutate: async ({ id, status }) => {
+      setStatusUpdatingId(id)
+      await queryClient.cancelQueries({ queryKey: queryKeys.contacts })
+      const previous = queryClient.getQueryData<ListResponse<ContactDto>>(queryKeys.contacts)
+      if (previous) {
+        queryClient.setQueryData<ListResponse<ContactDto>>(queryKeys.contacts, {
+          ...previous,
+          items: previous.items.map((item) => (item.id === id ? { ...item, status } : item)),
+        })
+      }
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.contacts, context.previous)
+      }
+      toast.error('Mise à jour du statut échouée')
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.contacts })
+      toast.success('Statut mis à jour')
+    },
+    onSettled: () => {
+      setStatusUpdatingId(null)
+    },
+  })
+
   const filtered = useMemo(() => {
     const items = data ?? []
     return items.filter((contact: ContactDto) => {
@@ -108,10 +162,10 @@ export function ContactsPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const pageItems = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  const openCreate = () => {
-    setEditing(null)
-    setModalOpen(true)
-  }
+  // const openCreate = () => {
+  //   setEditing(null)
+  //   setModalOpen(true)
+  // }
 
   const openEdit = (contact: ContactDto) => {
     setEditing(contact)
@@ -121,6 +175,11 @@ export function ContactsPage() {
   const openDelete = (contact: ContactDto) => {
     setSelectedContact(contact)
     setConfirmOpen(true)
+  }
+
+  const handleStatusChange = (contact: ContactDto, nextStatus: ContactDto['status']) => {
+    if (contact.status === nextStatus) return
+    statusMutation.mutate({ id: contact.id, status: nextStatus })
   }
 
   return (
@@ -149,22 +208,25 @@ export function ContactsPage() {
               Cartes
             </Button>
           </div>
-          <Button onClick={openCreate}>Nouveau contact</Button>
+          {/* <Button onClick={openCreate}>Nouveau contact</Button> */}
         </div>
       </div>
 
       <Card className="space-y-4">
-        <div className="flex flex-wrap gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4  gap-3">
           <Input
             placeholder="Rechercher par nom, email ou téléphone"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            className='col-span-3'
           />
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="ALL">Tous les statuts</option>
-            <option value="new">Nouveau</option>
-            <option value="in_progress">En cours</option>
-            <option value="closed">Fermé</option>
+            {contactStatusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </Select>
         </div>
 
@@ -189,9 +251,20 @@ export function ContactsPage() {
                     <TableCell>{contact.email}</TableCell>
                     <TableCell>{contact.phone}</TableCell>
                     <TableCell>
-                      <Badge variant={contact.status === 'closed' ? 'success' : contact.status === 'in_progress' ? 'warning' : 'info'}>
-                        {contact.status}
-                      </Badge>
+                      <Select
+                        value={contact.status}
+                        onChange={(event) =>
+                          handleStatusChange(contact, event.target.value as ContactDto['status'])
+                        }
+                        disabled={statusUpdatingId === contact.id}
+                        className="w-20 px-2 py-1.5 pr-6 text-xs"
+                      >
+                        {contactStatusOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </Select>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
@@ -218,7 +291,11 @@ export function ContactsPage() {
                   key={contact.id}
                   className="group relative overflow-hidden border-[hsl(var(--border))] bg-[hsl(var(--background))] p-4 transition hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(15,23,42,0.08)]"
                 >
-                  <div className="absolute inset-x-0 top-0 h-1 bg-[hsl(var(--primary))]/70" />
+                  <div
+                    className={`absolute inset-x-0 top-0 h-1 ${
+                      contactStatusBarClasses[contactStatusVariants[contact.status]]
+                    }`}
+                  />
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[hsl(var(--accent))] text-sm font-semibold text-[hsl(var(--primary))]">
@@ -230,8 +307,8 @@ export function ContactsPage() {
                         <p className="text-xs text-muted-foreground">{contact.phone}</p>
                       </div>
                     </div>
-                    <Badge variant={contact.status === 'closed' ? 'success' : contact.status === 'in_progress' ? 'warning' : 'info'}>
-                      {contact.status}
+                    <Badge variant={contactStatusVariants[contact.status]}>
+                      {contactStatusLabels[contact.status] ?? contact.status}
                     </Badge>
                   </div>
                   <div className="mt-3 grid gap-3 text-xs text-muted-foreground">
@@ -244,13 +321,29 @@ export function ContactsPage() {
                       <p>{contact.message}</p>
                     </div>
                   </div>
-                  <div className="mt-4 flex gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => openEdit(contact)}>
-                      Modifier
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => openDelete(contact)}>
-                      Supprimer
-                    </Button>
+                  <div className="mt-4 flex items-center justify-between gap-2">
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => openEdit(contact)}>
+                        Modifier
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => openDelete(contact)}>
+                        Supprimer
+                      </Button>
+                    </div>
+                    <Select
+                      value={contact.status}
+                      onChange={(event) =>
+                        handleStatusChange(contact, event.target.value as ContactDto['status'])
+                      }
+                      disabled={statusUpdatingId === contact.id}
+                      className="w-20 p-0 text-xs"
+                    >
+                      {contactStatusOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
                 </Card>
               ))}
@@ -309,7 +402,7 @@ function ContactModal({
       postalCode: '',
       message: '',
       consent: true,
-      status: 'new',
+      status: 'nouveau',
     },
   })
 
@@ -334,7 +427,7 @@ function ContactModal({
         postalCode: '',
         message: '',
         consent: true,
-        status: 'new',
+        status: 'nouveau',
       })
     }
   }, [editing, reset])
@@ -377,9 +470,11 @@ function ContactModal({
         <div className="space-y-1">
           <label className="text-xs font-semibold">Statut</label>
           <Select {...register('status')}>
-            <option value="new">Nouveau</option>
-            <option value="in_progress">En cours</option>
-            <option value="closed">Fermé</option>
+            {contactStatusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </Select>
         </div>
         <div className="space-y-1 md:col-span-2">

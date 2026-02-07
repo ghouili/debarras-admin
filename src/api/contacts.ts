@@ -57,6 +57,10 @@ export function updateContact(id: string, payload: UpdateContactPayload) {
   return apiPatch<ContactDto>(`/api/contacts/${id}`, payload)
 }
 
+export function updateContactStatus(id: string, status: ContactDto['status']) {
+  return apiPatch<ContactDto>(`/api/contacts/${id}/status`, { status })
+}
+
 export function deleteContact(id: string) {
   return apiDelete<void>(`/api/contacts/${id}`)
 }

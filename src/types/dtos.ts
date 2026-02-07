@@ -13,7 +13,7 @@ export type UserDto = {
   updatedAt: string
 }
 
-export type ContactStatus = 'new' | 'in_progress' | 'closed'
+export type ContactStatus = 'nouveau' | 'en_cours' | 'fermee'
 
 export type ContactDto = {
   id: string
@@ -29,7 +29,7 @@ export type ContactDto = {
   updatedAt: string
 }
 
-export type DevisStatus = 'new' | 'quoted' | 'won' | 'lost'
+export type DevisStatus = 'nouveau' | 'traite' | 'gagne' | 'perdu'
 
 export type DevisDto = {
   id: string

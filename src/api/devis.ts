@@ -81,6 +81,10 @@ export function updateDevis(id: string, payload: UpdateDevisPayload) {
   return apiPatch<DevisDto>(`/api/devis/${id}`, payload)
 }
 
+export function updateDevisStatus(id: string, status: DevisDto['status']) {
+  return apiPatch<DevisDto>(`/api/devis/${id}/status`, { status })
+}
+
 export function deleteDevis(id: string) {
   return apiDelete<void>(`/api/devis/${id}`)
 }
